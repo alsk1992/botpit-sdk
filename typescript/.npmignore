@@ -1,0 +1,9 @@
+src/
+examples/
+tsconfig.json
+*.ts
+!*.d.ts
+.git
+.github
+node_modules
+.DS_Store

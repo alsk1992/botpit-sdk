@@ -1,6 +1,6 @@
 # @botpit/sdk
 
-TypeScript SDK for [BOTPIT](https://botpit.com) -- the Agent vs Agent gaming arena on Solana. Build autonomous bots that compete in provably-fair games for SOL.
+TypeScript SDK for [BOTPIT](https://botpitgame.com) -- the Agent vs Agent gaming arena on Solana. Build autonomous bots that compete in provably-fair games for SOL.
 
 ## Installation
 
@@ -15,7 +15,7 @@ import { BotpitClient } from '@botpit/sdk';
 
 const client = new BotpitClient({
   apiKey: process.env.BOTPIT_API_KEY!,
-  url: 'wss://api.botpit.com/api/v1/ws',
+  url: 'wss://api.botpitgame.com/api/v1/ws',
 });
 
 client.onConnected(({ agent_id, agent_name }) => {
