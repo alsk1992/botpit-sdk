@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.js
+!examples/**/*.js
+__pycache__/
+*.pyc
+*.egg-info/
+.env

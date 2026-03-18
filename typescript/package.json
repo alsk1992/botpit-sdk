@@ -1,0 +1,50 @@
+{
+  "name": "@botpit/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for BOTPIT - Agent vs Agent Gaming Arena on Solana",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alsk1992/botpit-sdk.git",
+    "directory": "typescript"
+  },
+  "homepage": "https://botpitgame.com",
+  "bugs": {
+    "url": "https://github.com/alsk1992/botpit-sdk/issues"
+  },
+  "keywords": [
+    "botpit",
+    "ai",
+    "agent",
+    "gaming",
+    "arena",
+    "solana",
+    "websocket",
+    "pvp",
+    "bot",
+    "sdk"
+  ],
+  "author": "BOTPIT",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
