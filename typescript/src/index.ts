@@ -90,6 +90,15 @@ export interface ChallengeCancelledEvent {
   challenge_id: string;
 }
 
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'none';
+
+export interface Logger {
+  debug(msg: string, ctx?: Record<string, any>): void;
+  info(msg: string, ctx?: Record<string, any>): void;
+  warn(msg: string, ctx?: Record<string, any>): void;
+  error(msg: string, ctx?: Record<string, any>): void;
+}
+
 export interface BotpitOptions {
   apiKey: string;
   url?: string;
@@ -99,9 +108,41 @@ export interface BotpitOptions {
   pingIntervalMs?: number;
   /** Max reconnect delay in ms (default: 30000) */
   maxReconnectDelayMs?: number;
+  /** Log level (default: 'info'). Set to 'none' to disable. */
+  logLevel?: LogLevel;
+  /** Custom logger implementation. Overrides logLevel. */
+  logger?: Logger;
+  /** Auth timeout in ms (default: 10000). Rejects connect() if auth not received. */
+  authTimeoutMs?: number;
 }
 
-export type EventHandler<T> = (event: T) => void;
+export type EventHandler<T> = (event: T) => void | Promise<void>;
+
+// ── Default Logger ────────────────────────────────────────────────
+
+const LOG_LEVELS: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3, none: 4 };
+
+function createDefaultLogger(level: LogLevel): Logger {
+  const threshold = LOG_LEVELS[level];
+  const fmt = (lvl: string, msg: string, ctx?: Record<string, any>) => {
+    const ts = new Date().toISOString();
+    const extra = ctx ? ' ' + JSON.stringify(ctx) : '';
+    return `${ts} [botpit] ${lvl}: ${msg}${extra}`;
+  };
+  return {
+    debug: (msg, ctx) => { if (threshold <= 0) console.debug(fmt('DEBUG', msg, ctx)); },
+    info: (msg, ctx) => { if (threshold <= 1) console.log(fmt('INFO', msg, ctx)); },
+    warn: (msg, ctx) => { if (threshold <= 2) console.warn(fmt('WARN', msg, ctx)); },
+    error: (msg, ctx) => { if (threshold <= 3) console.error(fmt('ERROR', msg, ctx)); },
+  };
+}
+
+// ── Queued Message ────────────────────────────────────────────────
+
+interface QueuedMessage {
+  data: any;
+  timestamp: number;
+}
 
 // ── Client ─────────────────────────────────────────────────────────
 
@@ -115,6 +156,8 @@ export class BotpitClient {
   private _connected = false;
   private _autoReconnect: boolean;
   private _pingIntervalMs: number;
+  private _authTimeoutMs: number;
+  private log: Logger;
 
   // Reconnection state
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -124,6 +167,14 @@ export class BotpitClient {
 
   // Heartbeat
   private _pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Outbound message queue — buffered when WS is down, flushed on reconnect
+  private _outboundQueue: QueuedMessage[] = [];
+  private _maxQueueSize = 50;
+  private _maxQueueAgeMs = 30_000;
+
+  // Move deadline tracking
+  private _turnDeadlines = new Map<string, number>(); // matchId -> deadline timestamp
 
   // Event handlers
   private onMatchFoundHandler?: EventHandler<MatchFoundEvent>;
@@ -144,11 +195,14 @@ export class BotpitClient {
   private onTauntReceivedHandler?: EventHandler<TauntReceivedEvent>;
 
   constructor(options: BotpitOptions) {
+    if (!options.apiKey) throw new Error('apiKey is required');
     this.apiKey = options.apiKey;
     this.url = options.url || 'wss://api.botpitgame.com/api/v1/ws';
     this._autoReconnect = options.autoReconnect !== false;
     this._pingIntervalMs = options.pingIntervalMs ?? 25_000;
     this._maxReconnectDelay = options.maxReconnectDelayMs ?? 30_000;
+    this._authTimeoutMs = options.authTimeoutMs ?? 10_000;
+    this.log = options.logger ?? createDefaultLogger(options.logLevel ?? 'info');
   }
 
   /** The authenticated agent's UUID */
@@ -167,24 +221,40 @@ export class BotpitClient {
     this._intentionalDisconnect = false;
 
     return new Promise((resolve, reject) => {
+      let authTimer: ReturnType<typeof setTimeout> | null = null;
+      let settled = false;
+
+      const settle = (fn: typeof resolve | typeof reject, val?: any) => {
+        if (settled) return;
+        settled = true;
+        if (authTimer) { clearTimeout(authTimer); authTimer = null; }
+        fn(val);
+      };
+
       try {
         this.ws = new WebSocket(this.url);
       } catch (err) {
-        reject(err);
+        settle(reject, err);
         return;
       }
 
+      // Auth timeout — reject if server doesn't respond
+      authTimer = setTimeout(() => {
+        this.log.error('Authentication timed out', { timeout_ms: this._authTimeoutMs });
+        this.ws?.close();
+        settle(reject, new Error(`Authentication timed out after ${this._authTimeoutMs}ms`));
+      }, this._authTimeoutMs);
+
       this.ws.on('open', () => {
-        // Authenticate immediately
         this.rawSend({ type: 'authenticate', api_key: this.apiKey });
       });
 
       this.ws.on('message', (data: Buffer) => {
         try {
           const msg: ServerMessage = JSON.parse(data.toString());
-          this.handleMessage(msg, resolve, reject);
-        } catch {
-          // Ignore unparseable messages
+          this.handleMessage(msg, (v) => settle(resolve, v), (e) => settle(reject, e));
+        } catch (err) {
+          this.log.error('Failed to parse server message', { raw: data.toString().slice(0, 200), error: String(err) });
         }
       });
 
@@ -194,7 +264,8 @@ export class BotpitClient {
         this.stopPing();
 
         if (wasConnected) {
-          this.onDisconnectHandler?.();
+          this.log.info('Disconnected from server');
+          this.safeCall(() => this.onDisconnectHandler?.());
         }
 
         if (!this._intentionalDisconnect && this._autoReconnect) {
@@ -203,10 +274,11 @@ export class BotpitClient {
       });
 
       this.ws.on('error', (err) => {
+        this.log.error('WebSocket error', { error: err.message });
         if (!this._connected) {
-          reject(err);
+          settle(reject, err);
         }
-        this.onErrorHandler?.({ code: 'ws_error', message: err.message });
+        this.safeCall(() => this.onErrorHandler?.({ code: 'ws_error', message: err.message }));
       });
     });
   }
@@ -215,11 +287,13 @@ export class BotpitClient {
     this._intentionalDisconnect = true;
     this.stopPing();
     this.clearReconnectTimer();
+    this._turnDeadlines.clear();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
     this._connected = false;
+    this.log.info('Disconnected (intentional)');
   }
 
   // ── Queue ────────────────────────────────────────────────────────
@@ -246,11 +320,24 @@ export class BotpitClient {
 
   // ── Moves ────────────────────────────────────────────────────────
 
+  /** Submit a move. Warns if past the server's timeout deadline. */
   makeMove(matchId: string, moveData: any): void {
+    const deadline = this._turnDeadlines.get(matchId);
+    if (deadline) {
+      const now = Date.now();
+      if (now > deadline) {
+        this.log.warn('Move submitted after timeout deadline', {
+          match_id: matchId,
+          late_by_ms: now - deadline,
+        });
+      }
+      this._turnDeadlines.delete(matchId);
+    }
     this.send({ type: 'make_move', match_id: matchId, move_data: moveData });
   }
 
   resign(matchId: string): void {
+    this._turnDeadlines.delete(matchId);
     this.send({ type: 'resign', match_id: matchId });
   }
 
@@ -353,12 +440,37 @@ export class BotpitClient {
 
   // ── Internals ────────────────────────────────────────────────────
 
+  /** Send with outbound queue buffering — messages are queued when WS is down and flushed on reconnect. */
   private send(msg: any): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     } else {
-      // Warn instead of silently dropping
-      console.warn(`[BotpitClient] Cannot send '${msg.type}': WebSocket not open (state=${this.ws?.readyState})`);
+      // Queue the message for retry on reconnect
+      if (this._outboundQueue.length >= this._maxQueueSize) {
+        const dropped = this._outboundQueue.shift();
+        this.log.warn('Outbound queue full, dropping oldest message', { dropped_type: dropped?.data?.type });
+      }
+      this._outboundQueue.push({ data: msg, timestamp: Date.now() });
+      this.log.warn(`Queued '${msg.type}' — WebSocket not open (state=${this.ws?.readyState})`, {
+        queue_size: this._outboundQueue.length,
+      });
+    }
+  }
+
+  /** Flush queued messages after reconnect, dropping expired ones. */
+  private flushQueue(): void {
+    const now = Date.now();
+    const fresh = this._outboundQueue.filter(m => (now - m.timestamp) < this._maxQueueAgeMs);
+    const expired = this._outboundQueue.length - fresh.length;
+    if (expired > 0) {
+      this.log.info(`Dropped ${expired} expired queued messages`);
+    }
+    this._outboundQueue = [];
+    for (const m of fresh) {
+      this.log.debug('Flushing queued message', { type: m.data?.type });
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(m.data));
+      }
     }
   }
 
@@ -368,85 +480,123 @@ export class BotpitClient {
     }
   }
 
+  /** Safely call a handler, catching and logging any exceptions. */
+  private safeCall(fn: () => void | Promise<void>): void {
+    try {
+      const result = fn();
+      if (result instanceof Promise) {
+        result.catch((err) => {
+          this.log.error('Unhandled error in event handler', { error: String(err), stack: (err as Error)?.stack });
+        });
+      }
+    } catch (err) {
+      this.log.error('Unhandled error in event handler', { error: String(err), stack: (err as Error)?.stack });
+    }
+  }
+
   private handleMessage(
     msg: ServerMessage,
     resolveConnect?: (value: void) => void,
     rejectConnect?: (reason: any) => void,
   ): void {
+    if (!msg.type) {
+      this.log.warn('Received message without type field', { msg: JSON.stringify(msg).slice(0, 200) });
+      return;
+    }
+
     switch (msg.type) {
       case 'authenticated':
         this._agentId = msg.agent_id;
         this._agentName = msg.agent_name;
         this._connected = true;
-        this._reconnectAttempts = 0; // Reset backoff on success
+        this._reconnectAttempts = 0;
         this.startPing();
-        this.onConnectedHandler?.({ agent_id: msg.agent_id, agent_name: msg.agent_name });
+        this.flushQueue();
+        this.log.info('Authenticated', { agent_id: msg.agent_id, agent_name: msg.agent_name });
+        this.safeCall(() => this.onConnectedHandler?.({ agent_id: msg.agent_id, agent_name: msg.agent_name }));
         resolveConnect?.();
         break;
 
       case 'error':
-        this.onErrorHandler?.({ code: msg.code, message: msg.message });
+        this.log.warn('Server error', { code: msg.code, message: msg.message });
+        this.safeCall(() => this.onErrorHandler?.({ code: msg.code, message: msg.message }));
         if (!this._agentId && rejectConnect) {
           rejectConnect(new Error(msg.message));
         }
         break;
 
+      case 'session_replaced':
+        this.log.error('Session replaced by another connection — this client is being disconnected');
+        this._autoReconnect = false; // Don't fight over the session
+        this.safeCall(() => this.onErrorHandler?.({ code: 'session_replaced', message: 'Another connection authenticated with your API key' }));
+        break;
+
       case 'match_found':
-        this.onMatchFoundHandler?.(msg as unknown as MatchFoundEvent);
+        this.safeCall(() => this.onMatchFoundHandler?.(msg as unknown as MatchFoundEvent));
         break;
 
       case 'game_start':
         this._side = msg.your_side;
-        this.onGameStartHandler?.(msg as unknown as GameStartEvent);
+        this.safeCall(() => this.onGameStartHandler?.(msg as unknown as GameStartEvent));
         break;
 
-      case 'your_turn':
-        this.onYourTurnHandler?.(msg as unknown as YourTurnEvent);
+      case 'your_turn': {
+        // Track move deadline
+        if (msg.timeout_ms) {
+          this._turnDeadlines.set(msg.match_id, Date.now() + msg.timeout_ms);
+        }
+        this.safeCall(() => this.onYourTurnHandler?.(msg as unknown as YourTurnEvent));
         break;
+      }
 
       case 'round_result':
-        this.onRoundResultHandler?.(msg as unknown as RoundResultEvent);
+        this.safeCall(() => this.onRoundResultHandler?.(msg as unknown as RoundResultEvent));
         break;
 
       case 'game_over':
         this._side = null;
-        this.onGameOverHandler?.(msg as unknown as GameOverEvent);
+        this._turnDeadlines.delete(msg.match_id);
+        this.safeCall(() => this.onGameOverHandler?.(msg as unknown as GameOverEvent));
         break;
 
       case 'queue_update':
-        this.onQueueUpdateHandler?.(msg as unknown as QueueUpdateEvent);
+        this.safeCall(() => this.onQueueUpdateHandler?.(msg as unknown as QueueUpdateEvent));
         break;
 
       case 'queue_joined':
-        this.onQueueJoinedHandler?.(msg as unknown as QueueJoinedEvent);
+        this.safeCall(() => this.onQueueJoinedHandler?.(msg as unknown as QueueJoinedEvent));
         break;
 
       case 'queue_left':
-        this.onQueueLeftHandler?.();
+        this.safeCall(() => this.onQueueLeftHandler?.());
         break;
 
       case 'opponent_moved':
-        this.onOpponentMovedHandler?.(msg as unknown as OpponentMovedEvent);
+        this.safeCall(() => this.onOpponentMovedHandler?.(msg as unknown as OpponentMovedEvent));
         break;
 
       case 'challenge_created':
-        this.onChallengeCreatedHandler?.(msg as unknown as ChallengeCreatedEvent);
+        this.safeCall(() => this.onChallengeCreatedHandler?.(msg as unknown as ChallengeCreatedEvent));
         break;
 
       case 'challenge_accepted':
-        this.onChallengeAcceptedHandler?.(msg as unknown as ChallengeAcceptedEvent);
+        this.safeCall(() => this.onChallengeAcceptedHandler?.(msg as unknown as ChallengeAcceptedEvent));
         break;
 
       case 'challenge_cancelled':
-        this.onChallengeCancelledHandler?.(msg as unknown as ChallengeCancelledEvent);
+        this.safeCall(() => this.onChallengeCancelledHandler?.(msg as unknown as ChallengeCancelledEvent));
         break;
 
       case 'taunt_received':
-        this.onTauntReceivedHandler?.(msg as unknown as TauntReceivedEvent);
+        this.safeCall(() => this.onTauntReceivedHandler?.(msg as unknown as TauntReceivedEvent));
         break;
 
       case 'pong':
         // Heartbeat response — connection alive
+        break;
+
+      default:
+        this.log.debug('Unknown message type', { type: msg.type });
         break;
     }
   }
@@ -467,13 +617,16 @@ export class BotpitClient {
     }
   }
 
-  // ── Reconnection with Exponential Backoff ─────────────────────────
+  // ── Reconnection with Exponential Backoff + Jitter ──────────────
 
   private scheduleReconnect(): void {
     this.clearReconnectTimer();
-    const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts), this._maxReconnectDelay);
+    const baseDelay = Math.min(1000 * Math.pow(2, this._reconnectAttempts), this._maxReconnectDelay);
+    // Add jitter: +-25% to prevent thundering herd
+    const jitter = baseDelay * 0.25 * (Math.random() * 2 - 1);
+    const delay = Math.max(500, Math.round(baseDelay + jitter));
     this._reconnectAttempts++;
-    console.log(`[BotpitClient] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})...`);
+    this.log.info(`Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})...`);
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect().catch(() => {

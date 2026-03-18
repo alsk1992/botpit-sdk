@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import random
+import time
 from typing import Any, Callable, Optional
 
 import websockets
@@ -35,7 +37,10 @@ class BotpitClient:
         auto_reconnect: bool = True,
         ping_interval: float = 25.0,
         max_reconnect_delay: float = 30.0,
+        auth_timeout: float = 10.0,
     ):
+        if not api_key:
+            raise ValueError("api_key is required")
         self.api_key = api_key
         self.url = url
         self.ws: Optional[ClientConnection] = None
@@ -47,8 +52,11 @@ class BotpitClient:
         self._auto_reconnect = auto_reconnect
         self._reconnect_attempts = 0
         self._max_reconnect_delay = max_reconnect_delay
+        self._auth_timeout = auth_timeout
         self._ping_task: Optional[asyncio.Task] = None
         self._ping_interval = ping_interval
+        # Move deadline tracking
+        self._turn_deadlines: dict[str, float] = {}  # match_id -> deadline timestamp
 
     # ── Event Registration ──────────────────────────────────────────
 
@@ -123,17 +131,30 @@ class BotpitClient:
         self.ws = await websockets.connect(self.url)
         await self._send({"type": "authenticate", "api_key": self.api_key})
 
-        # Wait for auth response
-        raw = await self.ws.recv()
+        # Wait for auth response with timeout
+        try:
+            raw = await asyncio.wait_for(self.ws.recv(), timeout=self._auth_timeout)
+        except asyncio.TimeoutError:
+            await self.ws.close()
+            self.ws = None
+            raise ConnectionError(f"Authentication timed out after {self._auth_timeout}s")
+
         msg = json.loads(raw)
-        if msg["type"] == "authenticated":
+        if msg.get("type") == "authenticated":
             self.agent_id = msg["agent_id"]
             self.agent_name = msg["agent_name"]
             self._reconnect_attempts = 0
             self._start_ping()
+            logger.info("Authenticated as %s (%s)", self.agent_name, self.agent_id)
             await self._dispatch("authenticated", msg)
-        elif msg["type"] == "error":
-            raise ConnectionError(f"Auth failed: {msg['message']}")
+        elif msg.get("type") == "error":
+            await self.ws.close()
+            self.ws = None
+            raise ConnectionError(f"Auth failed: {msg.get('message', 'unknown error')}")
+        else:
+            await self.ws.close()
+            self.ws = None
+            raise ConnectionError(f"Unexpected auth response: {msg.get('type')}")
 
     async def join_queue(self, game_type: str, wager_sol: float, sandbox: bool = False) -> None:
         """Join the matchmaking queue. wager_sol is in SOL (e.g. 0.01). Use 0 for free play.
@@ -153,7 +174,13 @@ class BotpitClient:
         await self._send({"type": "leave_queue"})
 
     async def make_move(self, match_id: str, move_data: Any) -> None:
-        """Submit a move for a match."""
+        """Submit a move for a match. Warns if past the server's timeout deadline."""
+        deadline = self._turn_deadlines.pop(match_id, None)
+        if deadline is not None:
+            now = time.monotonic()
+            if now > deadline:
+                late_ms = int((now - deadline) * 1000)
+                logger.warning("Move submitted %dms after timeout deadline (match=%s)", late_ms, match_id)
         await self._send({
             "type": "make_move",
             "match_id": match_id,
@@ -162,6 +189,7 @@ class BotpitClient:
 
     async def resign(self, match_id: str) -> None:
         """Resign from a match."""
+        self._turn_deadlines.pop(match_id, None)
         await self._send({"type": "resign", "match_id": match_id})
 
     async def create_challenge(self, game_type: str, wager_sol: float) -> None:
@@ -198,24 +226,46 @@ class BotpitClient:
                 async for raw in self.ws:
                     if not self._running:
                         break
-                    msg = json.loads(raw)
-                    msg_type = msg.get("type", "")
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        logger.error("Failed to parse server message: %s (raw: %s)", e, str(raw)[:200])
+                        continue
+
+                    msg_type = msg.get("type")
+                    if not msg_type:
+                        logger.warning("Received message without type field: %s", str(raw)[:200])
+                        continue
 
                     # Track side for game_start
                     if msg_type == "game_start":
                         self.side = msg.get("your_side")
                     elif msg_type == "game_over":
                         self.side = None
+                        self._turn_deadlines.pop(msg.get("match_id", ""), None)
+                    elif msg_type == "your_turn":
+                        # Track move deadline
+                        timeout_ms = msg.get("timeout_ms")
+                        if timeout_ms:
+                            self._turn_deadlines[msg["match_id"]] = time.monotonic() + timeout_ms / 1000.0
+                    elif msg_type == "session_replaced":
+                        logger.error("Session replaced by another connection — disabling reconnect")
+                        self._auto_reconnect = False
+                        await self._dispatch("error", msg)
+                        break
 
                     await self._dispatch(msg_type, msg)
 
-            except websockets.exceptions.ConnectionClosed:
+            except websockets.exceptions.ConnectionClosed as e:
                 self._stop_ping()
-                logger.info("Connection closed")
+                logger.info("Connection closed: %s", e)
                 await self._dispatch("disconnect", None)
+            except ConnectionError as e:
+                self._stop_ping()
+                logger.warning("Connection failed: %s", e)
             except Exception as e:
                 self._stop_ping()
-                logger.warning(f"Connection error: {e}")
+                logger.warning("Unexpected error: %s", e, exc_info=True)
                 await self._dispatch("disconnect", None)
 
             self.ws = None
@@ -223,10 +273,12 @@ class BotpitClient:
             if not self._running or not self._auto_reconnect:
                 break
 
-            # Exponential backoff reconnection
-            delay = min(2 ** self._reconnect_attempts, self._max_reconnect_delay)
+            # Exponential backoff with jitter to prevent thundering herd
+            base_delay = min(2 ** self._reconnect_attempts, self._max_reconnect_delay)
+            jitter = base_delay * 0.25 * (random.random() * 2 - 1)
+            delay = max(0.5, base_delay + jitter)
             self._reconnect_attempts += 1
-            logger.info(f"Reconnecting in {delay}s (attempt {self._reconnect_attempts})...")
+            logger.info("Reconnecting in %.1fs (attempt %d)...", delay, self._reconnect_attempts)
             await asyncio.sleep(delay)
 
     def stop(self) -> None:
@@ -239,24 +291,45 @@ class BotpitClient:
         self._running = False
         self._auto_reconnect = False
         self._stop_ping()
+        self._turn_deadlines.clear()
         if self.ws:
             await self.ws.close()
             self.ws = None
+
+    # ── Async Context Manager ────────────────────────────────────────
+
+    async def __aenter__(self) -> "BotpitClient":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.disconnect()
 
     # ── Internal ────────────────────────────────────────────────────
 
     async def _send(self, msg: dict) -> None:
         if self.ws:
-            await self.ws.send(json.dumps(msg))
+            try:
+                await self.ws.send(json.dumps(msg))
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Cannot send '%s': connection closed", msg.get("type"))
         else:
-            logger.warning(f"Cannot send '{msg.get('type')}': not connected")
+            logger.warning("Cannot send '%s': not connected", msg.get("type"))
 
     async def _dispatch(self, msg_type: str, msg: Any) -> None:
         handler = self._handlers.get(msg_type)
-        if handler:
+        if not handler:
+            return
+        try:
             result = handler(msg)
             if asyncio.iscoroutine(result):
                 await result
+        except Exception as e:
+            logger.error(
+                "Unhandled error in '%s' handler: %s",
+                msg_type, e,
+                exc_info=True,
+            )
 
     def _start_ping(self) -> None:
         self._stop_ping()
