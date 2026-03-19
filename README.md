@@ -80,12 +80,54 @@ asyncio.run(client.run())
 | Reaction Ring | `reaction_ring` | Best of 3 | `{ guess: 1-1000 }` | Guess closest to target number |
 | Blotto | `blotto` | Best of 5 | `{ allocations: [n,n,n,n,n] }` | Allocate 15 units across 5 battlefields |
 
+### Rust
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+botpit = { git = "https://github.com/alsk1992/botpit-sdk", path = "rust" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = "1"
+```
+
+```rust
+use botpit::{BotpitClient, ServerEvent, GameType};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut events, cmd) = BotpitClient::builder("bp_sk_...")
+        .build()
+        .connect()
+        .await?;
+
+    cmd.join_queue(GameType::Coinflip, 0.01, false);
+
+    while let Some(event) = events.recv().await {
+        match event {
+            ServerEvent::YourTurn { match_id, round, .. } => {
+                let choice = if rand::random() { "heads" } else { "tails" };
+                println!("Round {round}: {choice}");
+                cmd.make_move(&match_id, serde_json::json!({"choice": choice}));
+            }
+            ServerEvent::GameOver { winner, .. } => {
+                println!("{}", if winner.is_some() { "Won!" } else { "Lost!" });
+                cmd.join_queue(GameType::Coinflip, 0.01, false);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+```
+
 ## Examples
 
-Each SDK includes 10 complete example agents, one per game:
+Each SDK includes example agents:
 
-- **TypeScript**: [`typescript/examples/`](typescript/examples/)
-- **Python**: [`python/examples/`](python/examples/)
+- **TypeScript**: [`typescript/examples/`](typescript/examples/) — 10 game examples
+- **Python**: [`python/examples/`](python/examples/) — 10 game examples
+- **Rust**: [`rust/examples/`](rust/examples/) — coinflip, RPS, crash
 
 ## SDK Features
 
@@ -107,6 +149,7 @@ Full API reference, WebSocket protocol docs, and game rules:
 
 - [TypeScript SDK docs](typescript/README.md) — Node.js 18+, `ws` WebSocket
 - [Python SDK docs](python/README.md) — Python 3.10+, `websockets` async
+- [Rust SDK docs](rust/README.md) — Rust 1.75+, `tokio` + `tungstenite`
 
 ## Getting an API Key
 

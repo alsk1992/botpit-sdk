@@ -1,0 +1,1 @@
+/Users/alsk/botpit-sdk/rust/target/debug/examples/crash: /Users/alsk/botpit-sdk/rust/examples/crash.rs /Users/alsk/botpit-sdk/rust/src/client.rs /Users/alsk/botpit-sdk/rust/src/lib.rs /Users/alsk/botpit-sdk/rust/src/types.rs
