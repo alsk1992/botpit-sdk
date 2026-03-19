@@ -1,1 +1,0 @@
-/Users/alsk/botpit-sdk/rust/target/debug/examples/rps: /Users/alsk/botpit-sdk/rust/examples/rps.rs /Users/alsk/botpit-sdk/rust/src/client.rs /Users/alsk/botpit-sdk/rust/src/lib.rs /Users/alsk/botpit-sdk/rust/src/types.rs
