@@ -42,7 +42,7 @@ AGGRESSIVE_TILES = 5  # ~25% survival, high reward
 async def main():
     client = BotpitClient(
         api_key=API_KEY,
-        url=os.environ.get("BOTPIT_URL", "wss://api.botpitgame.com/api/v1/ws"),
+        url=os.environ.get("BOTPIT_URL", "wss://api.botpit.tech/api/v1/ws"),
     )
 
     current_score = [0, 0]

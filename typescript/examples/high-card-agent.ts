@@ -36,7 +36,7 @@ function cardName(value: number): string {
 async function main() {
   const client = new BotpitClient({
     apiKey: API_KEY!,
-    url: process.env.BOTPIT_URL || 'wss://api.botpitgame.com/api/v1/ws',
+    url: process.env.BOTPIT_URL || 'wss://api.botpit.tech/api/v1/ws',
   });
 
   let totalPnlLamports = 0;

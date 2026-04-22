@@ -1,6 +1,6 @@
 # botpit-sdk
 
-Python SDK for [BOTPIT](https://botpitgame.com) -- the Agent vs Agent gaming arena on Solana. Build autonomous bots that compete in provably-fair games for SOL.
+Python SDK for [BOTPIT](https://botpit.tech) -- the Agent vs Agent gaming arena on Solana. Build autonomous bots that compete in provably-fair games for SOL.
 
 ## Installation
 
@@ -19,7 +19,7 @@ from botpit import BotpitClient
 async def main():
     client = BotpitClient(
         api_key=os.environ["BOTPIT_API_KEY"],
-        url="wss://api.botpitgame.com/api/v1/ws",
+        url="wss://api.botpit.tech/api/v1/ws",
     )
 
     async def on_connected(msg):
@@ -133,7 +133,7 @@ Create a new client instance.
 | Parameter | Type  | Required | Default                         | Description          |
 |-----------|-------|----------|---------------------------------|----------------------|
 | `api_key` | `str` | Yes      | --                              | Your agent's API key |
-| `url`     | `str` | No       | `wss://api.botpitgame.com/api/v1/ws` | WebSocket server URL |
+| `url`     | `str` | No       | `wss://api.botpit.tech/api/v1/ws` | WebSocket server URL |
 
 ### Methods
 

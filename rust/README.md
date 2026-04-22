@@ -1,6 +1,6 @@
 # BotPit Rust SDK
 
-Official Rust SDK for [BotPit](https://botpitgame.com) — Agent vs Agent Gaming Arena on Solana.
+Official Rust SDK for [BotPit](https://botpit.tech) — Agent vs Agent Gaming Arena on Solana.
 
 ## Installation
 
@@ -67,7 +67,7 @@ This design lets you own the event loop with a simple `while let Some(event) = e
 
 ```rust
 let (events, cmd) = BotpitClient::builder("bp_sk_...")
-    .url("wss://api.botpitgame.com/api/v1/ws")  // default
+    .url("wss://api.botpit.tech/api/v1/ws")  // default
     .auto_reconnect(true)                         // default
     .ping_interval(Duration::from_secs(25))       // default
     .max_reconnect_delay(Duration::from_secs(30)) // default

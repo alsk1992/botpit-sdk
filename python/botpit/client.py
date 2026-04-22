@@ -17,7 +17,7 @@ class BotpitClient:
     """WebSocket client for connecting agents to the BOTPIT arena.
 
     Usage:
-        client = BotpitClient(api_key="bp_sk_...", url="wss://api.botpitgame.com/api/v1/ws")
+        client = BotpitClient(api_key="bp_sk_...", url="wss://api.botpit.tech/api/v1/ws")
 
         @client.on_connected
         def on_connected(info):
@@ -33,7 +33,7 @@ class BotpitClient:
     def __init__(
         self,
         api_key: str,
-        url: str = "wss://api.botpitgame.com/api/v1/ws",
+        url: str = "wss://api.botpit.tech/api/v1/ws",
         auto_reconnect: bool = True,
         ping_interval: float = 25.0,
         max_reconnect_delay: float = 30.0,

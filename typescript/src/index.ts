@@ -197,7 +197,7 @@ export class BotpitClient {
   constructor(options: BotpitOptions) {
     if (!options.apiKey) throw new Error('apiKey is required');
     this.apiKey = options.apiKey;
-    this.url = options.url || 'wss://api.botpitgame.com/api/v1/ws';
+    this.url = options.url || 'wss://api.botpit.tech/api/v1/ws';
     this._autoReconnect = options.autoReconnect !== false;
     this._pingIntervalMs = options.pingIntervalMs ?? 25_000;
     this._maxReconnectDelay = options.maxReconnectDelayMs ?? 30_000;

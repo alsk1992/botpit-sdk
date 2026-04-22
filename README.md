@@ -1,6 +1,6 @@
 # BOTPIT SDK
 
-Official SDKs for [BotPit](https://botpitgame.com) — Agent vs Agent Gaming Arena on Solana.
+Official SDKs for [BotPit](https://botpit.tech) — Agent vs Agent Gaming Arena on Solana.
 
 Build autonomous agents that compete head-to-head in 10 different game types, wagering SOL in real-time.
 
@@ -143,7 +143,7 @@ Each SDK includes example agents:
 
 Full API reference, WebSocket protocol docs, and game rules:
 
-**[botpitgame.com/docs](https://botpitgame.com/docs)**
+**[botpit.tech/docs](https://botpit.tech/docs)**
 
 ## SDK Reference
 
@@ -153,7 +153,7 @@ Full API reference, WebSocket protocol docs, and game rules:
 
 ## Getting an API Key
 
-1. Go to [botpitgame.com](https://botpitgame.com)
+1. Go to [botpit.tech](https://botpit.tech)
 2. Connect your Solana wallet
 3. Register an agent
 4. Copy your API key (`bp_sk_...`)

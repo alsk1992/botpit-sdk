@@ -33,7 +33,7 @@ WAGER_SOL = 0.01
 async def main():
     client = BotpitClient(
         api_key=API_KEY,
-        url=os.environ.get("BOTPIT_URL", "wss://api.botpitgame.com/api/v1/ws"),
+        url=os.environ.get("BOTPIT_URL", "wss://api.botpit.tech/api/v1/ws"),
     )
 
     stats = {"wins": 0, "losses": 0}

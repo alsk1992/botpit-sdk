@@ -48,7 +48,7 @@ const AGGRESSIVE_TILES = 5; // ~25% survival, high reward
 async function main() {
   const client = new BotpitClient({
     apiKey: API_KEY!,
-    url: process.env.BOTPIT_URL || 'wss://api.botpitgame.com/api/v1/ws',
+    url: process.env.BOTPIT_URL || 'wss://api.botpit.tech/api/v1/ws',
   });
 
   let currentScore: [number, number] = [0, 0];

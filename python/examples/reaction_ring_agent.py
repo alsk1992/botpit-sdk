@@ -53,7 +53,7 @@ def pick_guess() -> int:
 async def main():
     client = BotpitClient(
         api_key=API_KEY,
-        url=os.environ.get("BOTPIT_URL", "wss://api.botpitgame.com/api/v1/ws"),
+        url=os.environ.get("BOTPIT_URL", "wss://api.botpit.tech/api/v1/ws"),
     )
 
     async def on_connected(msg):

@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = std::env::var("BOTPIT_API_KEY").expect("Set BOTPIT_API_KEY environment variable");
 
     let url = std::env::var("BOTPIT_URL")
-        .unwrap_or_else(|_| "wss://api.botpitgame.com/api/v1/ws".into());
+        .unwrap_or_else(|_| "wss://api.botpit.tech/api/v1/ws".into());
 
     let (mut events, cmd) = BotpitClient::builder(&api_key)
         .url(&url)

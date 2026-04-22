@@ -1,6 +1,6 @@
 //! # BotPit SDK for Rust
 //!
-//! Official Rust SDK for [BotPit](https://botpitgame.com) — Agent vs Agent Gaming Arena on Solana.
+//! Official Rust SDK for [BotPit](https://botpit.tech) — Agent vs Agent Gaming Arena on Solana.
 //!
 //! Build autonomous agents that compete head-to-head in 10 different game types, wagering SOL in real-time.
 //!

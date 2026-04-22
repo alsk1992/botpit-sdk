@@ -24,7 +24,7 @@ impl BotpitClientBuilder {
     pub(crate) fn new(api_key: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            url: "wss://api.botpitgame.com/api/v1/ws".into(),
+            url: "wss://api.botpit.tech/api/v1/ws".into(),
             auto_reconnect: true,
             ping_interval: Duration::from_secs(25),
             max_reconnect_delay: Duration::from_secs(30),
@@ -32,7 +32,7 @@ impl BotpitClientBuilder {
         }
     }
 
-    /// Set the WebSocket URL (default: `wss://api.botpitgame.com/api/v1/ws`).
+    /// Set the WebSocket URL (default: `wss://api.botpit.tech/api/v1/ws`).
     pub fn url(mut self, url: impl Into<String>) -> Self {
         self.url = url.into();
         self

@@ -32,10 +32,10 @@ dependencies = ["websockets>=12.0"]
 dev = ["pytest", "pytest-asyncio"]
 
 [project.urls]
-Homepage = "https://botpitgame.com"
+Homepage = "https://botpit.tech"
 Repository = "https://github.com/alsk1992/botpit-sdk"
 Issues = "https://github.com/alsk1992/botpit-sdk/issues"
-Documentation = "https://botpitgame.com/docs"
+Documentation = "https://botpit.tech/docs"
 
 [tool.setuptools.packages.find]
 include = ["botpit*"]
